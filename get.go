@@ -28,11 +28,11 @@ func (g *Getter) Download(ref string, path string, timeout time.Duration) (err e
 	return g.DownloadWithContext(ctx, ref, path)
 }
 func (g *Getter) DownloadWithContext(ctx context.Context, ref string, path string) (err error) {
-	if g.shouldSkipDownload(ctx, ref, path) {
+	if g.shouldSkip(ctx, ref, path) {
 		return
 	}
 
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+	file, err := os.Create(path)
 	if err != nil {
 		return
 	}
@@ -42,37 +42,29 @@ func (g *Getter) DownloadWithContext(ctx context.Context, ref string, path strin
 	if err != nil {
 		return
 	}
-	response, err := g.Client.Do(g.withHeader(request))
+	response, err := g.Client.Do(g.patchHeader(request))
 	if err != nil {
 		return
 	}
 	defer response.Body.Close()
 
-	var written int64
-	if g.Verbose {
-		bar := progressbar.NewOptions64(response.ContentLength,
-			progressbar.OptionSetTheme(progressbar.Theme{Saucer: "=", SaucerPadding: ".", BarStart: "|", BarEnd: "|"}),
-			progressbar.OptionSetWidth(10),
-			progressbar.OptionSpinnerType(11),
-			progressbar.OptionShowBytes(true),
-			progressbar.OptionShowCount(),
-			progressbar.OptionSetPredictTime(false),
-			progressbar.OptionSetDescription(filepath.Base(ref)),
-			progressbar.OptionSetRenderBlankState(true),
-			progressbar.OptionClearOnFinish(),
-		)
-		defer bar.Clear()
-		written, err = io.Copy(io.MultiWriter(file, bar), response.Body)
-	} else {
-		written, err = io.Copy(file, response.Body)
-	}
-
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		return fmt.Errorf("response status code %d invalid", response.StatusCode)
 	}
 
-	if err == nil && written < response.ContentLength {
-		err = fmt.Errorf("expected %s but downloaded %s", humanize.Bytes(uint64(response.ContentLength)), humanize.Bytes(uint64(written)))
+	var writer io.Writer = file
+	if g.Verbose {
+		bar := g.progressBar(ref, response.ContentLength)
+		defer func() {
+			_ = bar.Clear()
+			_ = bar.Close()
+		}()
+		writer = io.MultiWriter(file, bar)
+	}
+
+	wrote, err := io.Copy(writer, response.Body)
+	if err == nil && wrote < response.ContentLength {
+		err = fmt.Errorf("expected %s but downloaded %s", humanize.Bytes(uint64(response.ContentLength)), humanize.Bytes(uint64(wrote)))
 	}
 
 	return
@@ -123,31 +115,45 @@ func (g *Getter) BatchInOrder(refs []string, paths []string, concurrent int, eac
 	return
 }
 
-func (g *Getter) shouldSkipDownload(ctx context.Context, ref string, path string) (skip bool) {
+func (g *Getter) shouldSkip(ctx context.Context, ref string, path string) (skip bool) {
 	stat, err := os.Stat(path)
 	if err != nil {
 		return
 	}
+	if stat.Size() == 0 {
+		return
+	}
 
-	if stat.Size() > 0 {
-		headReq, headErr := http.NewRequestWithContext(ctx, http.MethodHead, ref, nil)
-		if headErr != nil {
-			return
-		}
-		resp, headErr := g.Client.Do(g.withHeader(headReq))
-		if headErr != nil {
-			return
-		}
-		if stat.Size() == resp.ContentLength {
-			return true // skip download
-		}
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, ref, nil)
+	if err != nil {
+		return
+	}
+	resp, err := g.Client.Do(g.patchHeader(req))
+	if err != nil {
+		return
+	}
+	if stat.Size() == resp.ContentLength {
+		return true // skip download
 	}
 
 	return
 }
-func (g *Getter) withHeader(request *http.Request) *http.Request {
+func (g *Getter) patchHeader(request *http.Request) *http.Request {
 	for head, content := range g.Header {
 		request.Header.Set(head, content)
 	}
 	return request
+}
+func (g *Getter) progressBar(ref string, size int64) *progressbar.ProgressBar {
+	return progressbar.NewOptions64(size,
+		progressbar.OptionSetTheme(progressbar.Theme{Saucer: "=", SaucerPadding: ".", BarStart: "|", BarEnd: "|"}),
+		progressbar.OptionSetWidth(10),
+		progressbar.OptionSpinnerType(11),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionShowCount(),
+		progressbar.OptionSetPredictTime(false),
+		progressbar.OptionSetDescription(filepath.Base(ref)),
+		progressbar.OptionSetRenderBlankState(true),
+		progressbar.OptionClearOnFinish(),
+	)
 }

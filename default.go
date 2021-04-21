@@ -5,26 +5,26 @@ import (
 	"time"
 )
 
-var defaultGet = Getter{
+var _default = Getter{
 	Header: map[string]string{
 		"user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.72 Safari/537.36",
 	},
 }
 
 func DefaultGetter() Getter {
-	return defaultGet
+	return _default
 }
 
 func Download(ref string, path string, timeout time.Duration) (err error) {
-	return defaultGet.Download(ref, path, timeout)
+	return _default.Download(ref, path, timeout)
 }
 func DownloadWithContext(ctx context.Context, ref string, path string) (err error) {
-	return defaultGet.DownloadWithContext(ctx, ref, path)
+	return _default.DownloadWithContext(ctx, ref, path)
 }
 
 func Batch(downloads map[string]string, concurrent int, eachTimeout time.Duration) (errors map[string]error) {
-	return defaultGet.Batch(downloads, concurrent, eachTimeout)
+	return _default.Batch(downloads, concurrent, eachTimeout)
 }
 func BatchInOrder(refs []string, paths []string, concurrent int, eachTimeout time.Duration) (errRefs []string, errors []error) {
-	return defaultGet.BatchInOrder(refs, paths, concurrent, eachTimeout)
+	return _default.BatchInOrder(refs, paths, concurrent, eachTimeout)
 }
