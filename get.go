@@ -17,6 +17,9 @@ import (
 )
 
 type Getter struct {
+	BeforeDL func(ref string, path string)
+	AfterDL  func(ref string, path string, err error)
+
 	Header  map[string]string
 	Client  http.Client
 	Verbose bool
@@ -28,6 +31,13 @@ func (g *Getter) Download(ref string, path string, timeout time.Duration) (err e
 	return g.DownloadWithContext(ctx, ref, path)
 }
 func (g *Getter) DownloadWithContext(ctx context.Context, ref string, path string) (err error) {
+	if g.BeforeDL != nil {
+		g.BeforeDL(ref, path)
+	}
+	if g.AfterDL != nil {
+		defer g.AfterDL(ref, path, err)
+	}
+
 	if g.shouldSkip(ctx, ref, path) {
 		return
 	}
