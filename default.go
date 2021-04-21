@@ -5,14 +5,18 @@ import (
 	"time"
 )
 
-var defaultGet = &Getter{
+var defaultGet = Getter{
 	Header: map[string]string{
 		"user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.72 Safari/537.36",
 	},
 }
 
-func Download(timeout time.Duration, ref string, path string) (err error) {
-	return defaultGet.Download(timeout, ref, path)
+func DefaultGetter() Getter {
+	return defaultGet
+}
+
+func Download(ref string, path string, timeout time.Duration) (err error) {
+	return defaultGet.Download(ref, path, timeout)
 }
 func DownloadWithContext(ctx context.Context, ref string, path string) (err error) {
 	return defaultGet.DownloadWithContext(ctx, ref, path)

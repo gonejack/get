@@ -22,7 +22,7 @@ type Getter struct {
 	Verbose bool
 }
 
-func (g *Getter) Download(timeout time.Duration, ref string, path string) (err error) {
+func (g *Getter) Download(ref string, path string, timeout time.Duration) (err error) {
 	ctx, cancel := context.WithTimeout(context.TODO(), timeout)
 	defer cancel()
 	return g.DownloadWithContext(ctx, ref, path)
@@ -106,7 +106,7 @@ func (g *Getter) BatchInOrder(refs []string, paths []string, concurrent int, eac
 		group.Go(func() (err error) {
 			defer batch.Release(1)
 
-			err = g.Download(eachTimeout, ref, path)
+			err = g.Download(ref, path, eachTimeout)
 			if err != nil {
 				mutex.Lock()
 				errRefs = append(errRefs, ref)
