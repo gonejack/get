@@ -1,5 +1,5 @@
 # get
-Simple download library
+Basic download library in golang
 
 ### Install
 ```shell
