@@ -35,9 +35,7 @@ func (g *Getter) DownloadWithContext(ctx context.Context, ref string, path strin
 		g.BeforeDL(ref, path)
 	}
 	if g.AfterDL != nil {
-		defer func() {
-			g.AfterDL(ref, path, err)
-		}()
+		defer func() { g.AfterDL(ref, path, err) }()
 	}
 
 	if g.shouldSkip(ctx, ref, path) {
@@ -54,19 +52,19 @@ func (g *Getter) DownloadWithContext(ctx context.Context, ref string, path strin
 	if err != nil {
 		return
 	}
-	response, err := g.Client.Do(g.patchHeader(request))
+	resp, err := g.Client.Do(g.patchHeader(request))
 	if err != nil {
 		return
 	}
-	defer response.Body.Close()
+	defer resp.Body.Close()
 
-	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return fmt.Errorf("response status code %d invalid", response.StatusCode)
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("response status code %d invalid", resp.StatusCode)
 	}
 
 	var writer io.Writer = file
 	if g.Verbose {
-		bar := g.progressBar(ref, response.ContentLength)
+		bar := g.progressBar(ref, resp.ContentLength)
 		defer func() {
 			_ = bar.Clear()
 			_ = bar.Close()
@@ -74,12 +72,15 @@ func (g *Getter) DownloadWithContext(ctx context.Context, ref string, path strin
 		writer = io.MultiWriter(file, bar)
 	}
 
-	wrote, err := io.Copy(writer, response.Body)
-	if err == nil && wrote < response.ContentLength {
-		err = fmt.Errorf("expected %s but downloaded %s", humanize.Bytes(uint64(response.ContentLength)), humanize.Bytes(uint64(wrote)))
+	wrote, err := io.Copy(writer, resp.Body)
+	switch {
+	case err != nil:
+		return
+	case wrote < resp.ContentLength:
+		return fmt.Errorf("expected %s but downloaded %s", humanize.Bytes(uint64(resp.ContentLength)), humanize.Bytes(uint64(wrote)))
+	default:
+		return
 	}
-
-	return
 }
 func (g *Getter) Batch(downloads map[string]string, concurrent int, eachTimeout time.Duration) (errors map[string]error) {
 	var refs, paths []string
