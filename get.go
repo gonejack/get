@@ -35,7 +35,9 @@ func (g *Getter) DownloadWithContext(ctx context.Context, ref string, path strin
 		g.BeforeDL(ref, path)
 	}
 	if g.AfterDL != nil {
-		defer g.AfterDL(ref, path, err)
+		defer func() {
+			g.AfterDL(ref, path, err)
+		}()
 	}
 
 	if g.shouldSkip(ctx, ref, path) {
