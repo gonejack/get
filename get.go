@@ -79,6 +79,7 @@ func (g *Getter) DownloadWithContext(ctx context.Context, ref string, path strin
 	case wrote < resp.ContentLength:
 		return fmt.Errorf("expected %s but downloaded %s", humanize.Bytes(uint64(resp.ContentLength)), humanize.Bytes(uint64(wrote)))
 	default:
+		_, _ = os.OpenFile(path+".ok", os.O_CREATE|os.O_EXCL, 0666)
 		return
 	}
 }
@@ -129,6 +130,12 @@ func (g *Getter) BatchInOrder(refs []string, paths []string, concurrent int, eac
 }
 
 func (g *Getter) shouldSkip(ctx context.Context, ref string, path string) (skip bool) {
+	fd, err := os.Open(path + ".ok")
+	if err == nil {
+		_ = fd.Close()
+		return true
+	}
+
 	stat, err := os.Stat(path)
 	if err != nil {
 		return
