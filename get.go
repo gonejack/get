@@ -79,7 +79,7 @@ func (g *Getter) DownloadWithContext(ctx context.Context, ref string, path strin
 	case wrote < resp.ContentLength:
 		return fmt.Errorf("expected %s but downloaded %s", humanize.Bytes(uint64(resp.ContentLength)), humanize.Bytes(uint64(wrote)))
 	default:
-		f, e := os.OpenFile(path+".ok", os.O_CREATE|os.O_EXCL, 0666)
+		f, e := os.OpenFile(path+".ok", os.O_RDWR|os.O_CREATE, 0666)
 		if e == nil {
 			_ = f.Close()
 		}
