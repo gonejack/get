@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -14,38 +13,41 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-type Getter struct {
-	BeforeDL func(ref string, path string)
-	AfterDL  func(ref string, path string, err error)
-	Header   map[string]string
-	Client   http.Client
+type Get struct {
+	OnEachStart func(t *DownloadTask)
+	OnEachStop  func(t *DownloadTask)
+	Header      map[string]string
+	Client      http.Client
 }
 
-func (g *Getter) Download(ref string, path string, timeout time.Duration) (err error) {
+func (g *Get) Download(dl *DownloadTask, timeout time.Duration) (err error) {
 	ctx, cancel := context.WithTimeout(context.TODO(), timeout)
 	defer cancel()
 
-	return g.DownloadWithContext(ctx, ref, path)
+	return g.DownloadWithContext(ctx, dl)
 }
-func (g *Getter) DownloadWithContext(ctx context.Context, ref string, path string) (err error) {
-	if g.BeforeDL != nil {
-		g.BeforeDL(ref, path)
+func (g *Get) DownloadWithContext(ctx context.Context, d *DownloadTask) (err error) {
+	if g.OnEachStart != nil {
+		g.OnEachStart(d)
 	}
-	if g.AfterDL != nil {
+	if g.OnEachStop != nil {
 		defer func() {
-			g.AfterDL(ref, path, err)
+			d.Err = err
+			g.OnEachStop(d)
 		}()
 	}
-	if g.shouldSkip(ctx, ref, path) {
+	if g.shouldSkip(ctx, d) {
 		return
 	}
 
 	req := resty.NewWithClient(&g.Client).R()
-	req.SetContext(ctx)
-	req.SetHeaders(g.Header)
-	req.SetOutput(path)
+	{
+		req.SetContext(ctx)
+		req.SetHeaders(g.Header)
+		req.SetOutput(d.Path)
+	}
 
-	rsp, err := req.Get(ref)
+	rsp, err := req.Get(d.Link)
 	switch {
 	case err != nil:
 		return
@@ -54,67 +56,40 @@ func (g *Getter) DownloadWithContext(ctx context.Context, ref string, path strin
 	case rsp.Size() < rsp.RawResponse.ContentLength:
 		return fmt.Errorf("expected %s but downloaded %s", humanize.Bytes(uint64(rsp.RawResponse.ContentLength)), humanize.Bytes(uint64(rsp.Size())))
 	default:
-		f, e := os.OpenFile(path+".ok", os.O_RDWR|os.O_CREATE, 0666)
+		f, e := os.OpenFile(d.Path+".ok", os.O_RDWR|os.O_CREATE, 0666)
 		if e == nil {
 			_ = f.Close()
 		}
 		return
 	}
 }
-func (g *Getter) Batch(downloads map[string]string, concurrent int, eachTimeout time.Duration) (errors map[string]error) {
-	var refs, paths []string
-	for r, p := range downloads {
-		refs = append(refs, r)
-		paths = append(paths, p)
-	}
-
-	eRefs, errs := g.BatchInOrder(refs, paths, concurrent, eachTimeout)
-	if len(errs) > 0 {
-		errors = make(map[string]error)
-		for i := range eRefs {
-			errors[eRefs[i]] = errs[i]
-		}
-	}
-
-	return
-}
-func (g *Getter) BatchInOrder(refs []string, paths []string, concurrent int, eachTimeout time.Duration) (errRefs []string, errors []error) {
+func (g *Get) Batch(downloads *Downloads, concurrent int, eachTimeout time.Duration) *Downloads {
 	var w = semaphore.NewWeighted(int64(concurrent))
 	var eg errgroup.Group
-	var mu sync.Mutex
 
-	for i := range refs {
+	for i := range downloads.List {
 		_ = w.Acquire(context.TODO(), 1)
 
-		ref, path := refs[i], paths[i]
-		eg.Go(func() (e error) {
+		dl := downloads.List[i]
+		eg.Go(func() (err error) {
 			defer w.Release(1)
-
-			e = g.Download(ref, path, eachTimeout)
-			if e != nil {
-				mu.Lock()
-				errRefs = append(errRefs, ref)
-				errors = append(errors, e)
-				mu.Unlock()
-			}
-
+			dl.Err = g.Download(dl, eachTimeout)
 			return
 		})
 	}
 
 	_ = eg.Wait()
 
-	return
+	return downloads
 }
-
-func (g *Getter) shouldSkip(ctx context.Context, ref string, path string) (skip bool) {
-	fd, err := os.Open(path + ".ok")
+func (g *Get) shouldSkip(ctx context.Context, d *DownloadTask) (skip bool) {
+	fd, err := os.Open(d.Path + ".ok")
 	if err == nil {
 		_ = fd.Close()
 		return true
 	}
 
-	stat, err := os.Stat(path)
+	stat, err := os.Stat(d.Path)
 	if err != nil {
 		return
 	}
@@ -123,9 +98,12 @@ func (g *Getter) shouldSkip(ctx context.Context, ref string, path string) (skip 
 	}
 
 	rq := resty.NewWithClient(&g.Client).R()
-	rq.SetContext(ctx)
-	rq.SetHeaders(g.Header)
-	rp, err := rq.Head(ref)
+	{
+		rq.SetContext(ctx)
+		rq.SetHeaders(g.Header)
+	}
+
+	rp, err := rq.Head(d.Link)
 	if err == nil && stat.Size() == rp.RawResponse.ContentLength {
 		return true // skip download
 	}

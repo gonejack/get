@@ -8,18 +8,19 @@ import (
 )
 
 func main() {
-	err := get.Download("https://www.qq.com", "test.html", time.Second*3)
+	err := get.Download(get.NewDownload("https://www.qq.com", "test.html"), time.Second*3)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	errors := get.Batch(map[string]string{"https://www.qq.com": "test.html"}, 3, time.Second*3)
-	for _, e := range errors {
-		log.Print(e)
+	downloads := get.NewDownloads()
+	{
+		downloads.Add("https://www.qq.com", "test.html")
 	}
-
-	refs, errs := get.BatchInOrder([]string{"https://www.qq.com"}, []string{"test.html"}, 3, time.Second*3)
-	for i := range refs {
-		log.Printf("%s: %s", refs[i], errs[i])
+	downloads = get.Batch(downloads, 3, time.Second*3)
+	for _, d := range downloads.List {
+		if d.Err != nil {
+			log.Println(d.Err)
+		}
 	}
 }
