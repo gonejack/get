@@ -20,11 +20,11 @@ type Get struct {
 	Client      http.Client
 }
 
-func (g *Get) Download(dl *DownloadTask, timeout time.Duration) (err error) {
+func (g *Get) Download(task *DownloadTask, timeout time.Duration) (err error) {
 	ctx, cancel := context.WithTimeout(context.TODO(), timeout)
 	defer cancel()
 
-	return g.DownloadWithContext(ctx, dl)
+	return g.DownloadWithContext(ctx, task)
 }
 func (g *Get) DownloadWithContext(ctx context.Context, d *DownloadTask) (err error) {
 	if g.OnEachStart != nil {
@@ -63,14 +63,14 @@ func (g *Get) DownloadWithContext(ctx context.Context, d *DownloadTask) (err err
 		return
 	}
 }
-func (g *Get) Batch(downloads *Downloads, concurrent int, eachTimeout time.Duration) *Downloads {
+func (g *Get) Batch(tasks *DownloadTasks, concurrent int, eachTimeout time.Duration) *DownloadTasks {
 	var w = semaphore.NewWeighted(int64(concurrent))
 	var eg errgroup.Group
 
-	for i := range downloads.List {
+	for i := range tasks.List {
 		_ = w.Acquire(context.TODO(), 1)
 
-		dl := downloads.List[i]
+		dl := tasks.List[i]
 		eg.Go(func() (err error) {
 			defer w.Release(1)
 			dl.Err = g.Download(dl, eachTimeout)
@@ -80,7 +80,7 @@ func (g *Get) Batch(downloads *Downloads, concurrent int, eachTimeout time.Durat
 
 	_ = eg.Wait()
 
-	return downloads
+	return tasks
 }
 func (g *Get) shouldSkip(ctx context.Context, d *DownloadTask) (skip bool) {
 	fd, err := os.Open(d.Path + ".ok")

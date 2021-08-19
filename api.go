@@ -20,6 +20,6 @@ func Download(dl *DownloadTask, timeout time.Duration) (err error) {
 func DownloadWithContext(ctx context.Context, dl *DownloadTask) (err error) {
 	return one.DownloadWithContext(ctx, dl)
 }
-func Batch(jobs *Downloads, concurrent int, eachTimeout time.Duration) *Downloads {
-	return one.Batch(jobs, concurrent, eachTimeout)
+func Batch(tasks *DownloadTasks, concurrent int, eachTimeout time.Duration) *DownloadTasks {
+	return one.Batch(tasks, concurrent, eachTimeout)
 }

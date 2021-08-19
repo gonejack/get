@@ -6,21 +6,27 @@ type DownloadTask struct {
 	Err  error
 }
 
-func NewDownload(ref, path string) *DownloadTask {
+func NewDownloadTask(link, path string) *DownloadTask {
 	return &DownloadTask{
-		Link: ref,
+		Link: link,
 		Path: path,
 	}
 }
 
-type Downloads struct {
+type DownloadTasks struct {
 	List []*DownloadTask
 }
 
-func (d *Downloads) Add(ref, path string) {
-	d.List = append(d.List, NewDownload(ref, path))
+func (d *DownloadTasks) Add(link, path string) {
+	d.List = append(d.List, NewDownloadTask(link, path))
 }
 
-func NewDownloads() *Downloads {
-	return &Downloads{}
+func (d *DownloadTasks) ForEach(f func(t *DownloadTask)) {
+	for _, t := range d.List {
+		f(t)
+	}
+}
+
+func NewDownloadTasks() *DownloadTasks {
+	return &DownloadTasks{}
 }

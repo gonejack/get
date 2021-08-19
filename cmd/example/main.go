@@ -8,12 +8,12 @@ import (
 )
 
 func main() {
-	err := get.Download(get.NewDownload("https://www.qq.com", "test.html"), time.Second*3)
+	err := get.Download(get.NewDownloadTask("https://www.qq.com", "test.html"), time.Second*3)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	downloads := get.NewDownloads()
+	downloads := get.NewDownloadTasks()
 	{
 		downloads.Add("https://www.qq.com", "test.html")
 	}
