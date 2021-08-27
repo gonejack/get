@@ -56,6 +56,10 @@ func (g *Get) DownloadWithContext(ctx context.Context, d *DownloadTask) (err err
 	case rsp.Size() < rsp.RawResponse.ContentLength:
 		return fmt.Errorf("expected %s but downloaded %s", humanize.Bytes(uint64(rsp.RawResponse.ContentLength)), humanize.Bytes(uint64(rsp.Size())))
 	default:
+		mtime, e := http.ParseTime(rsp.Header().Get("last-modified"))
+		if e == nil {
+			_ = os.Chtimes(d.Path, mtime, mtime)
+		}
 		f, e := os.OpenFile(d.Path+".ok", os.O_RDWR|os.O_CREATE, 0666)
 		if e == nil {
 			_ = f.Close()

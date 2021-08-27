@@ -8,19 +8,8 @@ import (
 )
 
 func main() {
-	err := get.Download(get.NewDownloadTask("https://www.qq.com", "test.html"), time.Second*3)
+	err := get.Download(get.NewDownloadTask("https://wx2.sinaimg.cn/large/008h3uCply1gtumw52q7aj31nj27enk8.jpg", "test.jpg"), time.Minute)
 	if err != nil {
 		log.Fatal(err)
-	}
-
-	downloads := get.NewDownloadTasks()
-	{
-		downloads.Add("https://www.qq.com", "test.html")
-	}
-	downloads = get.Batch(downloads, 3, time.Second*3)
-	for _, d := range downloads.List {
-		if d.Err != nil {
-			log.Println(d.Err)
-		}
 	}
 }
