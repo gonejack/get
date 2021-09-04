@@ -41,11 +41,9 @@ func (g *Get) DownloadWithContext(ctx context.Context, d *DownloadTask) (err err
 	}
 
 	req := resty.NewWithClient(&g.Client).R()
-	{
-		req.SetContext(ctx)
-		req.SetHeaders(g.Header)
-		req.SetOutput(d.Path)
-	}
+	req.SetContext(ctx)
+	req.SetHeaders(g.Header)
+	req.SetOutput(d.Path)
 
 	rsp, err := req.Get(d.Link)
 	switch {
@@ -69,31 +67,32 @@ func (g *Get) DownloadWithContext(ctx context.Context, d *DownloadTask) (err err
 }
 func (g *Get) Batch(tasks *DownloadTasks, concurrent int, eachTimeout time.Duration) *DownloadTasks {
 	var w = semaphore.NewWeighted(int64(concurrent))
-	var eg errgroup.Group
+	var grp errgroup.Group
 
-	for i := range tasks.List {
+	tasks.ForEach(func(t *DownloadTask) {
 		_ = w.Acquire(context.TODO(), 1)
 
-		dl := tasks.List[i]
-		eg.Go(func() (err error) {
+		grp.Go(func() (err error) {
 			defer w.Release(1)
-			dl.Err = g.Download(dl, eachTimeout)
+
+			t.Err = g.Download(t, eachTimeout)
+
 			return
 		})
-	}
+	})
 
-	_ = eg.Wait()
+	_ = grp.Wait()
 
 	return tasks
 }
-func (g *Get) shouldSkip(ctx context.Context, d *DownloadTask) (skip bool) {
-	fd, err := os.Open(d.Path + ".ok")
+func (g *Get) shouldSkip(ctx context.Context, task *DownloadTask) (skip bool) {
+	fd, err := os.Open(task.Path + ".ok")
 	if err == nil {
 		_ = fd.Close()
 		return true
 	}
 
-	stat, err := os.Stat(d.Path)
+	stat, err := os.Stat(task.Path)
 	if err != nil {
 		return
 	}
@@ -102,12 +101,10 @@ func (g *Get) shouldSkip(ctx context.Context, d *DownloadTask) (skip bool) {
 	}
 
 	rq := resty.NewWithClient(&g.Client).R()
-	{
-		rq.SetContext(ctx)
-		rq.SetHeaders(g.Header)
-	}
+	rq.SetContext(ctx)
+	rq.SetHeaders(g.Header)
 
-	rp, err := rq.Head(d.Link)
+	rp, err := rq.Head(task.Link)
 	if err == nil && stat.Size() == rp.RawResponse.ContentLength {
 		return true // skip download
 	}

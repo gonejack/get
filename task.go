@@ -14,15 +14,20 @@ func NewDownloadTask(link, path string) *DownloadTask {
 }
 
 type DownloadTasks struct {
-	List []*DownloadTask
+	tasks []*DownloadTask
 }
 
 func (d *DownloadTasks) Add(link, path string) {
-	d.List = append(d.List, NewDownloadTask(link, path))
+	for _, t := range d.tasks {
+		if t.Link == link && t.Path == path {
+			return
+		}
+	}
+	d.tasks = append(d.tasks, NewDownloadTask(link, path))
 }
 
 func (d *DownloadTasks) ForEach(f func(t *DownloadTask)) {
-	for _, t := range d.List {
+	for _, t := range d.tasks {
 		f(t)
 	}
 }
