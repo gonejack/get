@@ -16,6 +16,7 @@ import (
 type Get struct {
 	OnEachStart func(t *DownloadTask)
 	OnEachStop  func(t *DownloadTask)
+	OnEachSkip  func(t *DownloadTask)
 	Header      map[string]string
 	Client      http.Client
 }
@@ -26,26 +27,31 @@ func (g *Get) Download(task *DownloadTask, timeout time.Duration) (err error) {
 
 	return g.DownloadWithContext(ctx, task)
 }
-func (g *Get) DownloadWithContext(ctx context.Context, d *DownloadTask) (err error) {
-	if g.OnEachStart != nil {
-		g.OnEachStart(d)
-	}
-	if g.OnEachStop != nil {
-		defer func() {
-			d.Err = err
-			g.OnEachStop(d)
-		}()
-	}
-	if g.shouldSkip(ctx, d) {
+func (g *Get) DownloadWithContext(ctx context.Context, task *DownloadTask) (err error) {
+	if g.shouldSkip(ctx, task) {
+		if g.OnEachSkip != nil {
+			g.OnEachSkip(task)
+		}
 		return
 	}
+
+	if g.OnEachStart != nil {
+		g.OnEachStart(task)
+	}
+
+	defer func() {
+		task.Err = err
+		if g.OnEachStop != nil {
+			g.OnEachStop(task)
+		}
+	}()
 
 	req := resty.NewWithClient(&g.Client).R()
 	req.SetContext(ctx)
 	req.SetHeaders(g.Header)
-	req.SetOutput(d.Path)
+	req.SetOutput(task.Path)
 
-	rsp, err := req.Get(d.Link)
+	rsp, err := req.Get(task.Link)
 	switch {
 	case err != nil:
 		return
@@ -56,9 +62,9 @@ func (g *Get) DownloadWithContext(ctx context.Context, d *DownloadTask) (err err
 	default:
 		mtime, e := http.ParseTime(rsp.Header().Get("last-modified"))
 		if e == nil {
-			_ = os.Chtimes(d.Path, mtime, mtime)
+			_ = os.Chtimes(task.Path, mtime, mtime)
 		}
-		f, e := os.OpenFile(d.Path+".ok", os.O_RDWR|os.O_CREATE, 0666)
+		f, e := os.OpenFile(task.Path+".ok", os.O_RDWR|os.O_CREATE, 0666)
 		if e == nil {
 			_ = f.Close()
 		}
@@ -86,28 +92,33 @@ func (g *Get) Batch(tasks *DownloadTasks, concurrent int, eachTimeout time.Durat
 	return tasks
 }
 func (g *Get) shouldSkip(ctx context.Context, task *DownloadTask) (skip bool) {
+	// check .ok file exist
 	fd, err := os.Open(task.Path + ".ok")
 	if err == nil {
 		_ = fd.Close()
 		return true
 	}
 
-	stat, err := os.Stat(task.Path)
+	// check target file size
+	local, err := os.Stat(task.Path)
 	if err != nil {
-		return
-	}
-	if stat.Size() == 0 {
-		return
+		return false
 	}
 
-	rq := resty.NewWithClient(&g.Client).R()
-	rq.SetContext(ctx)
-	rq.SetHeaders(g.Header)
+	switch local.Size() {
+	case 0:
+		return false
+	default:
+		req := resty.NewWithClient(&g.Client).R()
+		req.SetContext(ctx)
+		req.SetHeaders(g.Header)
+		rsp, err := req.Head(task.Link)
 
-	rp, err := rq.Head(task.Link)
-	if err == nil && stat.Size() == rp.RawResponse.ContentLength {
-		return true // skip download
+		// remote and local has equal size
+		if err == nil && rsp.RawResponse.ContentLength == local.Size() {
+			return true
+		}
+
+		return false
 	}
-
-	return
 }
