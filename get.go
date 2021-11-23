@@ -3,12 +3,11 @@ package get
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/dustin/go-humanize"
-	"github.com/go-resty/resty/v2"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -17,7 +16,7 @@ type Get struct {
 	OnEachStart func(t *DownloadTask)
 	OnEachStop  func(t *DownloadTask)
 	OnEachSkip  func(t *DownloadTask)
-	Header      map[string]string
+	Header      http.Header
 	Client      http.Client
 }
 
@@ -34,11 +33,9 @@ func (g *Get) DownloadWithContext(ctx context.Context, task *DownloadTask) (err 
 		}
 		return
 	}
-
 	if g.OnEachStart != nil {
 		g.OnEachStart(task)
 	}
-
 	defer func() {
 		task.Err = err
 		if g.OnEachStop != nil {
@@ -46,43 +43,68 @@ func (g *Get) DownloadWithContext(ctx context.Context, task *DownloadTask) (err 
 		}
 	}()
 
-	req := resty.NewWithClient(&g.Client).R()
-	req.SetContext(ctx)
-	req.SetHeaders(g.Header)
-	req.SetOutput(task.Path)
-
-	rsp, err := req.Get(task.Link)
-	switch {
-	case err != nil:
-		return
-	case !rsp.IsSuccess():
-		return fmt.Errorf("response status code %d invalid", rsp.StatusCode())
-	case rsp.Size() < rsp.RawResponse.ContentLength:
-		return fmt.Errorf("expected %s but downloaded %s", humanize.Bytes(uint64(rsp.RawResponse.ContentLength)), humanize.Bytes(uint64(rsp.Size())))
-	default:
-		mtime, e := http.ParseTime(rsp.Header().Get("last-modified"))
-		if e == nil {
-			_ = os.Chtimes(task.Path, mtime, mtime)
-		}
-		f, e := os.OpenFile(task.Path+".ok", os.O_RDWR|os.O_CREATE, 0666)
-		if e == nil {
-			_ = f.Close()
-		}
+	f, err := os.OpenFile(task.Path, os.O_RDWR|os.O_CREATE, 0766)
+	if err != nil {
 		return
 	}
+	defer f.Close()
+
+	req, err := http.NewRequest(http.MethodGet, task.Link, nil)
+	if err != nil {
+		return
+	}
+	if s, e := f.Stat(); e == nil {
+		if s.Size() > 0 {
+			req.Header.Set("range", fmt.Sprintf("bytes=%d-", s.Size()))
+		}
+	}
+	for k := range g.Header {
+		req.Header[k] = g.Header[k]
+	}
+
+	rsp, err := g.Client.Do(req.WithContext(ctx))
+	if err != nil {
+		return
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, rsp.Body)
+		_ = rsp.Body.Close()
+	}()
+
+	switch rsp.StatusCode {
+	case http.StatusPartialContent:
+		_, _ = f.Seek(0, io.SeekEnd)
+	case http.StatusOK, http.StatusRequestedRangeNotSatisfiable:
+		_ = f.Truncate(0)
+	default:
+		return fmt.Errorf("invalid status code %d(%s)", rsp.StatusCode, rsp.Status)
+	}
+
+	_, err = io.Copy(f, rsp.Body)
+	if err != nil {
+		return fmt.Errorf("copy error: %s", err)
+	}
+
+	mt, e := http.ParseTime(rsp.Header.Get("last-modified"))
+	if e == nil {
+		_ = os.Chtimes(task.Path, mt, mt)
+	}
+	ok, e := os.Create(task.Path + ".ok")
+	if e == nil {
+		_ = ok.Close()
+	}
+
+	return
 }
 func (g *Get) Batch(tasks *DownloadTasks, concurrent int, eachTimeout time.Duration) *DownloadTasks {
-	var w = semaphore.NewWeighted(int64(concurrent))
+	var sema = semaphore.NewWeighted(int64(concurrent))
 	var grp errgroup.Group
 
 	tasks.ForEach(func(t *DownloadTask) {
-		_ = w.Acquire(context.TODO(), 1)
-
+		_ = sema.Acquire(context.TODO(), 1)
 		grp.Go(func() (err error) {
-			defer w.Release(1)
-
+			defer sema.Release(1)
 			t.Err = g.Download(t, eachTimeout)
-
 			return
 		})
 	})
@@ -109,16 +131,15 @@ func (g *Get) shouldSkip(ctx context.Context, task *DownloadTask) (skip bool) {
 	case 0:
 		return false
 	default:
-		req := resty.NewWithClient(&g.Client).R()
-		req.SetContext(ctx)
-		req.SetHeaders(g.Header)
-		rsp, err := req.Head(task.Link)
-
-		// remote and local has equal size
-		if err == nil && rsp.RawResponse.ContentLength == local.Size() {
-			return true
+		req, err := http.NewRequest(http.MethodHead, task.Link, nil)
+		if err == nil {
+			req.Header = g.Header
+			rsp, err := g.Client.Do(req.WithContext(ctx))
+			if err == nil {
+				_ = rsp.Body.Close()
+				return rsp.ContentLength == local.Size()
+			}
 		}
-
 		return false
 	}
 }
